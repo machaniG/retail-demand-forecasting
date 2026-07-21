@@ -1,0 +1,35 @@
+# config/base_config.yaml
+
+# dataset paths
+DATA_PATH: data/raw/elastic_product_transactions.csv
+PROCESSED_DATA_PATH: data/processed/
+SCORING_DATA_PATH: data/scoring/
+
+# model path
+MODEL_PATH: models/
+
+
+# model training parameters
+
+MODEL_TYPE: lgbm
+LIGHTGBM_PARAMS:
+  objective: regression
+  metric: rmse
+  num_leaves: 31
+  learning_rate: 0.03
+  n_estimators: 500
+  random_state: 42
+  colsample_bytree: 0.8
+  subsample: 0.8
+
+BATCH_SIZE: 32
+LEARNING_RATE: 0.001
+
+# forecast parameters
+FORECAST_PARAMS:
+  target_col: target
+  quantity_col: Quantity
+  date_col: InvoiceDate
+  sku_col: StockCode
+  split_date: "2010-10-01"
+  forecast_horizon: 28
