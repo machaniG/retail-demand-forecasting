@@ -20,14 +20,14 @@ EDA revealed that historical demand is highly skewed, ranging from 1 to 19k unit
 
 **Next question was whether to model retail demand, wholesale demand, or both?**
 
-```plaintext
+
 | Type | Typical Quantity|
 |---:|---:|
 | Retail order | 1–20 |
 | Small bulk order | 50–200|
 | Wholesale order | 200 - 1000|
 | Mega bulk orders | 1000–19000|
-```
+
 
 If a forecasting model sees all these together, it will try to learn a single process for multiple demand-generating mechanisms.
 That often hurts forecasting. After careful analysis of the sales velocity (quantiles: min = 1, 25% = 1, 50% = 3, 75% = 12, 90% = 24, 95% = 32, 99% = 120, max = 19,152), I decided to use custom segmentation to handle the variance and split the data into seven operational sub-segments instead of treating all inventory the same. This allowed me to separate the stable high-volume tier from the unpredictable mega-bulk orders. It also allows the model to capture clear, specific demand signals for every type of item—from high-volume daily bestsellers to slow-moving long-tail products.
