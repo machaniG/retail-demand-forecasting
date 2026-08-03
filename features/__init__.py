@@ -3,7 +3,7 @@ from .easter_christmas import create_christmas_features
 from .lag_features import create_lag_features
 from .momentum import create_momentum_features
 from .rolling import create_rolling_features
-from .sku_features import create_sku_features
+from .sku import create_sku_features
 from .create_target import create_target
 from .feature_pipeline import build_demand_features
 from .product_lifecycle import create_product_lifecycle_features
