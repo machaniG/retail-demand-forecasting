@@ -1,0 +1,13 @@
+pandas
+numpy
+scikit-learn
+lightgbm
+xgboost
+matplotlib
+seaborn
+#statmodels
+scipy
+datetime
+holidays
+pyarrow
+plotly

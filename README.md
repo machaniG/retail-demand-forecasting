@@ -2,19 +2,47 @@
 
 ## Summary
 
-Price can be used as an operational lever to actively manipulate demand via pricing strategies. 
-Historical SKU demand establishes the baseline forecast, while pricing and recent demand signals refine short-term expectations.
+This project builds a LightGBM demand forecasting model for online retail using historical SKU demand, pricing, rolling demand signals, and calendar features.
 
+The model uses **quantile regression with `alpha=0.60`**, targeting the 60th percentile of demand to place greater emphasis on avoiding under-forecasting than a median forecast.
 
-## Business Problem
+| Forecast horizon | WMAPE | Forecast bias |
+|---|---:|---:|
+| Weekly | **11.3%** | **-1.8%** |
+| Daily | **63.0%** | Not reported |
 
-In high volume online retail where daily sales reach thousands of units, managing inventory without accurate demand forecasting quickly turns into a high-stakes balancing act between two operational traps: tied-up capital from overstocking or lost revenue and customer churn from stockouts. Demand forecasting bridges this gap by transforming historical sales data into predictive operational visibility—ensuring inventory levels precisely mirror real market demand while protecting cash flow and optimizing warehouse throughput. 
+The weekly forecast is the primary operational output because weekly aggregation reduces the effect of volatile day-to-day ordering patterns.
+
+**Key finding:** Historical SKU demand is the strongest forecast anchor. Price and price ratio are also major drivers, while rolling demand and calendar features refine the forecast based on current momentum and timing.
 
 ---
 
-## Business Solution: Segmented Demand Forecasting
+## Business Problem
 
-To solve the dual risks of overstocking and stockouts across thousands of daily orders, this project built a Segmented Demand Forecasting System.
+Online retailers must balance two competing inventory risks:
+
+- **Overstocking:** Excess inventory ties up working capital, increases storage costs, and raises the risk of markdowns or obsolescence.
+- **Stockouts:** Insufficient inventory causes lost sales, delayed fulfillment, and poorer customer experience.
+
+Demand varies substantially across products and over time. A forecasting system must estimate expected demand while accounting for product popularity, pricing, recent sales momentum, and recurring calendar patterns.
+
+---
+
+## Business Solution
+
+The project uses a **single LightGBM model** trained across the 99th percentile of fast moving weekly selling SKUs. The model learns demand patterns using a shared feature set that captures:
+
+- Long-term SKU demand characteristics
+- Current and relative pricing
+- Recent demand momentum and volatility
+- Product lifecycle maturity
+- Weekly and seasonal calendar effects
+
+The model uses LightGBM's **quantile objective with `alpha=0.60`**. This targets a forecast above the conditional median and is intended to reduce the operational risk of under-forecasting when stockouts are more costly than holding a modest amount of additional inventory.
+
+---
+
+## EDA Insights
 
 EDA revealed that historical demand is highly skewed, ranging from 1 to 19k units. A very tiny fraction (**0.1% of the total transactions**); only 500 out of over 504,731K transactions have quantities over 1K. However, the 500 transactions (0.1% of transactions) account for 10.7% of total volume. This is not a simple long tail but a fundamentally different demand regime.
 
@@ -30,89 +58,35 @@ EDA revealed that historical demand is highly skewed, ranging from 1 to 19k unit
 
 
 If a forecasting model sees all these together, it will try to learn a single process for multiple demand-generating mechanisms.
-That often hurts forecasting. After careful analysis of the sales velocity (quantiles: min = 1, 25% = 1, 50% = 3, 75% = 12, 90% = 24, 95% = 32, 99% = 120, max = 19,152), I decided to use custom segmentation to handle the variance and split the data into seven operational sub-segments instead of treating all inventory the same. This allowed me to separate the stable high-volume tier from the unpredictable mega-bulk orders. It also allows the model to capture clear, specific demand signals for every type of item—from high-volume daily bestsellers to slow-moving long-tail products.
+That often hurts forecasting. After detailed EDA, I found that most SKUs sell from 1 unit to large of batches and that basically all customers place both small and large orders. This means that the data cannot be segmented using either **Customer ID or SKU** alone. 
+
+### Outlier Removal
+
+As an initial step, I classified each SKU by selling frequency and isolated fast moving from slow moving products based on how many distinct months the product recorded a sale. After careful analysis of the sales velocity (quantiles: min = 1, 25% = 1, 50% = 3, 75% = 12, 90% = 24, 95% = 32, 99% = 120, max = 19,152), rows above the 99th percentile (≥120 units) were excluded from training. This allowed me to separate the stable high-volume tier from the unpredictable mega-bulk orders. It also allows the model to capture clear, specific demand signals for every type of item.
 
 ---
 
-## Deliverable Business Value
+## Model Performance
 
-### 1. Eliminating Stockouts on Bestsellers (High-Vol Commercial)
+### Weekly Forecast Performance
 
-**Performance:** Reached a 7.13% weekly error rate.
+The model achieved a **weekly WMAPE of 11.3%** with a **forecast bias of -1.8%**.
 
-**Value:** Gives purchasing teams precise baseline demand for core revenue drivers. Ensures top sellers remain in stock without holding excessive buffer inventory.
+- **WMAPE of 11.29%:** Weekly forecast error is low relative to the total demand volume being forecast.
+- **Daily WMAPE: 63%**
+- **Operational interpretation:** The weekly forecast can serve as a baseline input for procurement, replenishment, and medium-term inventory planning, subject to normal business review and service-level policies.
 
-### 2. Protecting Cash Flow from Extreme Outliers (B2B Bulk Routing)
+The system achieved 11.29% weekly WMAPE on fast moving weekly SKUs using quantile regression, providing high-confidence baselines for both vendor procurement and daily warehouse fulfillment. This falls within typical industry WMAPE benchmarks for wholesale/commercial-leaning demand (commonly cited as **10%–20%**), implying that the inventory team can reliably use the models. Although higher, the 63% daily error rate is expected in retail demand which has inherently higher noise from impulsive purchases and quick trends as long as it smooths out over 7 day window. Daily e-commerce sales fluctuate heavily due to random noise (e.g., lower sales on Fridays, spikes on Mondays, a rainy Tuesday), yielding higher daily WMAPE. When you pool these days into a 7-day bucket, the random daily timing variations cancel each other out. Besides, intraday shipping and order latency have an impact of model errors because web traffic and processing delays, frequently shift a Monday night order to a Tuesday morning fulfillment. Weekly aggregation completely erases this exact InvoiceDate timestamp noise and smoots out the WMAPE. 
 
-**Strategy:** Identified and isolated B2B bulk orders (up to 19,000 units/day) into a dedicated manual review segment. The Mega Bulk orders are usually non-cyclical, contract-driven, or ad-hoc, which breaks time-series logic. So I flagged them for manual B2B sales pipeline tracking.
-
-**Value:** Prevents rare, massive bulk spikes from corrupting automated reorder points for standard retail items, avoiding massive unintended overstocking.
-
-### 3. Adapting to Price Sensitivity & Promotions (Commercial & Retail)
-
-**Strategy:** Leveraged price-ratio features to capture how customer demand shifts with price changes and discounts.
-
-**Value:** Allows category managers to predict volume surges caused by marketing promotions and pre-stock warehouses accordingly.
-
-### 4. Preventing Over-Ordering on Slow Bestsellers (Micro & Long-Tail)
-
-**Strategy:** Tailored the model using specialized loss metrics (Huber Loss) for low-volume, sparse items.
-
-**Value:** Prevents the system from over-reacting to one-off sales spikes, keeping capital free and warehouse racks clear of dead stock.
-
-"The system achieved 7.1% to 10.8% weekly WMAPE across all core revenue-generating segments (High-Vol Commercial, Wholesale, and Commercial), providing high-confidence baselines for both vendor procurement and daily warehouse fulfillment."
-
----
-
-## Overall System Performance 
-
-The system achieved 7.1%, 9.5%, and 10.8% weekly WMAPE across the High-Vol Commercial, Core-Wholesale, and Commercial segments, respectively, providing high-confidence baselines for both vendor procurement and daily warehouse fulfillment. The models achieved weekly WMAPE of 13% for Standard and 18.9% for Heavy-Retail. Although higher, 19% error rate is expected in retail demand which has inherently higher noise from impulsive purchases and quick trends. 
-
-Regardless of the segment, this system's forecasting accuracy is within the typical industry WMAPE benchmarks;  10% – 20% for wholesale / commercial, and 20% – 35% for heavy retail / trending SKUs due to impulse buys and trends, implying that the production team can reliably use the models.
-
-However, after doing research again I found that before deployment, the production team would verify the system's bias. 
+However, after doing research again I found that before deployment, the production team would verify the system's bias.
 
 
 ### Forecast Bias: Is the system over-forecasting or under-forecasting?
 
-While the model achieved strong Weekly WMAPE across all segments (especially commercial and wholesale), bias evaluation revealed a systematic negative bias (-6.53% to -18.99%) **except for the Core Wholesale segment that had a +1.10% bias**, indicating the raw model tends to under-predict sales spikes. 
+- **Forecast bias: -1.76%** (a slight, near-negligible under-prediction)
 
-- **Core-Wholesale: with a 9.51% weekly WMAPE and +1.10% forecast bias** is production ready as it is because errors are minor and cancel out naturally.
-- **High-Vol Commercial achieved the best weekly WMAPE of 7.13% but the forecasting bias (-6.53%)** is slightly above the industry benchmak (± 5%), therefore it needs minor adjustment such as applying a light 1.07x multiplier to eliminate stockout risk.
-- **Commercial & Retail Segments (-8.58% to -18.9% Bias):** LightGBM's standard loss function smoothed out high-frequency demand spikes, resulting in systematic under-forecasting in fast-moving retail channels. Further calibration and model tuning, such as custom loss function to penalize negative predictions, are needed. 
+Bias evaluation revealed a slight **near negligible negative bias (-1.76%)**. indicating the model has a small tendency of **under-predicting sales by only 2 percent**, which is within the **industry benchmak (forecast bias ±5%)**. The near-zero bias means the forecast is not systematically skewed in either direction at the aggregate level. The model is production ready as it is because errors are minor and cancel out naturally. However, because the model predicts lower sales than actually occurs by 2 percent, it needs minor adjustment such as applying a light 1.07x multiplier to eliminate stockout risk
 
-
-### How to Fix Under-forecasting Errors
-
-The model predicts lower sales than actually occur for Commercial and Retail segments. The operational impact of this is that the Warehouse runs out of stock, leading to stockouts, delayed shipments, and lost orders. 
-
-**Business Impact:**
-
-- **Understocking Risk:** Inventory systems relying on this raw forecast will consistently order ~6.5% to -19% fewer units than the market actually buys.
-- **Customer Churn:** Top-selling commercial items will frequently hit stockout status before the next replenishment cycle arrives.
-
-After researching I found that in production supply chain, the team would address this in two ways:
-
-#### 1. Production Post-Processing (The Operational Multiplier) or Safety Stock Buffer
-
-- In supply chain planning, the cost of a lost sale is usually higher than the cost of holding one extra unit. Category managers handle negative bias by adding an explicit Safety Stock Cushion to the baseline prediction.
-- In production supply chain systems, models with stable negative bias are often adjusted using an Operational Safety Multiplier: 
-    Final Forecast = Model Output times 1.1079, 
-    adjusting thr predictions upwards to recenter the forecast, driving overall bias back down near 0% without hurting the underlying model pattern.
-
-To prevent stockouts in production environments, I would apply a 1.11x Operational Calibration Factor (or explicit Safety Stock buffer) to the predictions, recentering overall bias to ~0% while preserving baseline precision.
-
-#### 2. Fix Negative Bias Inside the Model During Training
-
-In inventory management, the cost of a stockout is usually higher than the cost of holding extra stock. The most direct technical fix is to change how the algorithm views under-prediction versus over-prediction. Because standard loss functions (MSE/MAE) treat missing a sale by 10 units the exact same as over-buying by 10 units, LightGBM defaults to playing it safe on noisy data, pulling predictions down. I would **implement a custom objective function for LightGBM that penalizes under-predictions more heavily than over-predictions**. e.g., explicitly tell LightGBM: *Under-predicting demand is 30% to 50% worse than over-predicting.* The tree splits will naturally shift upward to avoid the higher penalty.
-
-
-Alternatively, I would **tune objective and eval metrics (Quantile Loss & Huber Loss).** Although I already used Huber Loss for the Micro segment, I didn't tune model parameters. Tuning Huber's alpha parameter (which controls the transition point between MSE and MAE) changes how aggressively the model reacts to right-tail sales spikes. Also standard models predict the mean (50th percentile). For segments with heavy negative bias (like Heavy Retail at -18.9%), I can use **asymmetric quantile regression (objective='quantile') and set alpha=0.55 or alpha=0.60 (predicting the 55th or 60th percentile)**. This forces the model to target a higher point in the demand distribution.
-
-Lastly, I would **engineer "spike-aware" trend and momentum features.** Negative bias often occurs because the model's features lag behind active real-world surges. Adding features that explicitly capture positive velocity gives the trees early warning signals to push predictions up: e.g.,
-    - **Short-Term Velocity Ratios:** Features like *Rolling Mean 3 / Rolling Mean 28*. If this ratio is > 1.0, the product is accelerating.
-    - **Consecutive High-Demand Days:** A counter tracking how many days in a row sales exceeded the 75th percentile.
-    - **Discount Depth Interaction:** Instead of just raw Price ratio, create *Price ratio * Rolling Mean 7* to help the model learn that discounts on already fast-moving items cause non-linear exponential spikes.
 
 ---
 
@@ -120,124 +94,156 @@ Lastly, I would **engineer "spike-aware" trend and momentum features.** Negative
 
 Feature importance was evaluated using two complementary LightGBM measures:
 
-- **Gain:** How much a feature reduces prediction error when it is used. High gain indicates strong predictive value.
-- **Split count:** How often a feature is used to divide observations in the trees. High split count indicates that the feature is frequently useful for refining decisions, but not necessarily that it produces the largest accuracy improvement.
+- **Split count:** How often a feature is used to divide observations in the decision trees. A high split count means the feature is frequently useful for refining predictions.
+- **Gain:** The total reduction in the model's loss produced by splits using that feature. A high gain means the feature contributes strongly to improving predictive accuracy.
 
-### Key Findings and Business Interpretation
+### Top Features
 
-#### Product Popularity Sets the Baseline
+| Rank | Top 10 by Split | Top 10 by Gain |
+|---:|---|---|
+| 1 | Price (3,543) | SKU mean quantity (15,032,493) |
+| 2 | Price ratio (3,369) | Price (6,040,753) |
+| 3 | SKU median quantity (1,950) | Price ratio (5,803,695) |
+| 4 | Days since first sale (1,243) | SKU median quantity (1,448,734) |
+| 5 | SKU avg price (1,129) | Rolling mean 7 (777,260) |
+| 6 | SKU mean quantity (998) | Rolling mean 28 (681,667) |
+| 7 | Rolling mean 14 (788) | SKU avg price (597,102) |
+| 8 | Rolling std 7 (749) | Day of week (516,581) |
+| 9 | Days to Christmas (677) | Rolling mean 14 (371,447) |
+| 10 | Day of week (640) | Days since first sale (337,522) |
 
-Across most segments, historical SKU demand—especially SKU mean quantity—generates substantially more predictive value than pricing features. This suggests that a product’s established popularity and typical sales volume are the primary drivers of expected demand.
+### Business Interpretation
 
-Price ratio is frequently used by the models to refine forecasts, but it generally contributes less overall error reduction. In business terms, pricing acts more like a demand modifier than a demand creator: a discount may increase sales, but the largest volume response is likely to come from products that already have strong underlying demand.
+The feature importance results indicate that the model forecasts demand in two layers.
 
-This means promotions should be planned around SKU popularity. Discounting a high-velocity product may create a meaningful volume increase and require additional inventory, while discounting a low-demand product may have a smaller effect because the product's underlying demand remains limited.
+#### 1. SKU demand establishes the baseline
 
+**SKU mean quantity** is the largest gain contributor by a wide margin, and **SKU median quantity** is also highly important. This indicates that a product's established demand level is the strongest anchor for the forecast.
 
-### Segment-Level Business Interpretation
+**Business translation:** Product popularity matters. A SKU with consistently strong historical demand is expected to remain a higher-volume product than a SKU with weak historical demand, all else being equal.
 
-| Segment | Primary demand driver | Business interpretation |
-|---|---|---|
-| Retail | SKU mean quantity | Historical product demand sets the baseline; price ratio refines expected demand around that baseline. |
-| Commercial | SKU mean quantity | Established sales velocity dominates, with recent demand and price signals helping adjust short-term forecasts. |
-| Standard | SKU mean quantity | Typical SKU demand is the main anchor; relative price provides an important secondary adjustment. |
-| Micro | Price ratio and SKU mean quantity | Pricing is unusually influential for sparse, low-volume demand and should be considered in promotion and replenishment decisions. |
-| High-Vol Commercial | SKU mean quantity | High-volume products are forecast mainly from stable historical demand, with price ratio providing promotional fine-tuning. |
-| Core-Wholesale | SKU demand level and variability | Wholesale demand is driven more by each SKU's typical volume, variability, and recent order behavior than by price alone. |
+#### 2. Price modifies demand around the SKU baseline
 
+**Price** and **price ratio** are the two most frequently used split features and are also the second- and third-largest contributors by gain.
 
-### Operational Implications
+**Business translation:** Pricing is a major demand lever, but it generally modifies demand around the product's underlying popularity rather than replacing that baseline. A discount may increase sales, but the largest absolute volume response is likely to occur when the discounted SKU already has meaningful demand.
 
-1. **Procurement and base inventory:** Use SKU historical demand statistics to establish baseline purchase quantities, warehouse capacity, and base safety stock.
-2. **Pricing and promotions:** Use price ratio as a short-term demand adjustment, especially for Micro, Retail, Standard, and High-Vol Commercial items. Promotions should be paired with temporary inventory buffers for high-velocity SKUs.
-3. **Wholesale planning:** Monitor demand variability and recent order signals alongside average demand because wholesale purchasing patterns are less dependent on price and more dependent on order behavior.
-4. **Model governance:** Track gain and split importance together. A feature that appears frequently in splits may be useful for local refinements without being the largest contributor to overall forecast accuracy.
+This is a predictive interpretation, not a causal estimate of price elasticity. Feature importance shows how useful pricing is to the model; it does not by itself prove how much a price change causes demand to increase.
 
-> **Business takeaway:** The models forecast demand in two layers: historical SKU demand determines the product's expected volume, while price and recent demand signals fine-tune the forecast for current conditions.
+#### 3. Recent demand momentum refines the forecast
+
+**Rolling mean 7, rolling mean 14, rolling mean 28, and rolling standard deviation 7** capture recent sales level and short-term volatility.
+
+**Business translation:** After establishing the SKU's long-term demand baseline, the model checks whether demand is currently accelerating, slowing, or becoming more volatile.
+
+#### 4. Calendar and lifecycle features capture timing effects
+
+**Day of week, days to Christmas, and days since first sale** help the model account for recurring weekly patterns, seasonal demand, and product maturity.
+
+**Business translation:** The same SKU may have different expected demand depending on the day of the week, proximity to the holiday period, and how long the product has been active.
+
+### Feature Importance Takeaway
+
+- **Historical SKU demand sets the expected volume, price and relative price adjust demand around that baseline, and recent demand plus calendar signals refine the timing of the forecast.**
 
 ---
-
 
 ## Operational Deployment & Recommendations
 
-Based on multi-segment evaluation and bias diagnostics, the system provides clear guidelines for supply chain, procurement, and warehouse operations:
+### 1. Procurement and Replenishment
 
-### 1. Procurement & Automated Reordering (Weekly Horizon)
+Use the **weekly forecast** as the primary baseline for purchase planning and replenishment.
 
-* **Core-Wholesale & High-Vol Commercial (7%–10% Weekly WMAPE):** 
-  * **Action:** **Automate baseline purchase orders.** Accuracy is high enough to drive direct electronic data interchange (EDI) vendor ordering and macro safety stock planning.
-  * **Calibration:** Core-Wholesale (+1.1% Bias) can be deployed out-of-the-box. High-Vol Commercial requires a light **1.07x bias multiplier** to ensure 95%+ service levels.
+Because the model has a small negative bias of **-1.8%**, address the bias before automated reordering. A small, consistent under-prediction means inventory systems relying on the raw forecast will order marginally fewer units than the market buys. Two standard approaches are usually applied:
 
-* **Standard & Heavy Retail Segments (13%–19% Weekly WMAPE):**
-  * **Action:** **Use for directional planning.** High intrinsic retail noise (impulse buys, fast trends) requires combining model baselines with commercial promo calendars. Apply post-processing scaling factors (**1.15x to 1.23x**) to eliminate negative bias.
+- **Operational multiplier (fastest to deploy):** apply a small upward correction factor (~1.018x, derived from the bias) to recenter the forecast near zero bias without retraining.
+- **Re-tune alpha:** since bias is governed largely by the quantile objective's alpha, a small alpha increase (e.g., 0.62–0.65) may close the remaining gap directly, cheaper to validate than adding new features, since it doesn't change what the model is learning, just where it's calibrated.
 
-### 2. Risk Mitigation & Manual B2B Routing
+Inventory decisions should still incorporate service-level targets, supplier lead times, and safety-stock policies.
 
-* **Extreme Bulk Orders (Segment 7):**
-  * **Action:** **Route to manual review.** B2B orders exceeding standard catalog thresholds (up to 19,000 units/day) are isolated from automated forecasting pipelines. This prevents one-off bulk buys from artificially corrupting consumer reorder thresholds.
+### 2. Scope SKUs Tiers Appropriately: Only weekly tier to automated reordering
 
-### 3. Warehouse & Labor Scheduling (Daily Horizon)
+Only the 2,358 SKUs classified into the weekly forecast tier should feed automated reordering. This tier represents 87% of volume, so the operational coverage is high despite covering just over half the SKU catalog by count.
 
-* **Daily WMAPE (23%–40%):** 
-    * **Action:** Do not use raw daily predictions as the sole basis for strict hour-by-hour labor scheduling because daily demand is inherently noisy. Instead, aggregate forecasts into rolling 3-day or weekly planning windows to support more reliable staffing decisions.
-    * **Historical Demand Patterns:** Visualize historical demand by day of the week to identify recurring high- and low-volume periods. Use these patterns alongside the model forecast to anticipate predictable weekly peaks and troughs—for example, scheduling additional warehouse labor on consistently high-demand days and reducing staffing on historically quieter days.
+Route monthly-tier and manual B2B routing appropriately, not by default
 
-- **Operational Value:** Combining weekly forecast volumes with historical day-of-week patterns provides a more stable basis for workforce planning while preserving visibility into recurring daily demand cycles.
+- **Monthly tier (32% of SKUs, 12% of volume):** real, recurring demand, just not enough for week-level patterns. Recommend either a lighter monthly-aggregated model (not yet built) or monthly-cadence manual review, rather than forcing these into the weekly pipeline.
+- **Manual tier (12% of SKUs, <1% of volume):** too sparse to model statistically. Route to simple reorder-point rules; a trained model would be fitting noise here.
+- **Flagged manual-review spikes (within the weekly tier):** large, irregular orders identified during EDA should continue to bypass the automated forecast and go to manual B2B tracking, regardless of which tier the SKU otherwise belongs to.
 
 
-### 4. Commercial Strategy & Price Elasticity
+### 3. Pricing and Promotion Planning
 
-* **Promotional Fine-Tuning:**
-  * **Action:** Category managers should use the **`Price Ratio`** feature to simulate demand response before launching discounts. Because pricing fine-tunes volume rather than altering baseline capacity, promotions must be paired with temporary safety-stock increases on high-velocity items. 
+Price and price ratio are major model drivers. Category managers can use pricing scenarios to assess how forecast demand changes under different price levels.
 
----
+Promotions should be evaluated together with SKU demand history:
 
-## Next Steps
+- High-demand SKUs may require temporary inventory buffers during promotions.
+- Low-demand SKUs may show a smaller absolute volume response even when discounted.
+- Promotional forecasts should be monitored against actual lift because feature importance is not a causal elasticity estimate.
 
-**What I would do next**
+Category managers simulating a discount should weight the expected volume lift by the SKU's baseline demand (from feature importance: SKU mean quantity dominates gain), a discount on an already-high-velocity item is far more likely to require a temporary inventory buffer than the same discount on a low-baseline item.
 
-- Look at a breakdown by product category to see what is driving that remaining modeling errors
-- Optimize the models using custom loss function to penalize under-predictions more.
-- Engineer spike-aware trend and momentum features that capture positive velocity to give the trees early warning signals to push predictions up.
 
----
+### 4. Warehouse and Labor Scheduling
 
-## Strategy
+Do not use the raw daily forecast as the sole basis for rigid hour-by-hour staffing because daily WMAPE is **63%**.
 
-I used a a bottom-up forecasting approach where I modeled daily demand and then aggregated the predictions weekly. Aggregating errors from daily to weekly dropped the **Weighted MAPE by more than 60 percent for micro, commercial, and core-wholesale segments**. For standard and heavy retail segments, weekly aggregation reduced the WMAPE by over 50 percent. After doing research, I found that daily e-commerce sales fluctuate heavily due to random noise (e.g., lower sales on Fridays, spikes on Mondays, a rainy Tuesday). When you pool these days into a 7-day bucket, the random daily timing variations cancel each other out. Besides, intraday shipping and order latency have an impact of model errors because web traffic and processing delays, frequently shift a Monday night order to a Tuesday morning fulfillment. Weekly aggregation completely erases this exact InvoiceDate timestamp noise and smoots out the WMAPE. It no longer matters if a buyer placed their restock order on a Tuesday or a Thursday; the bulk volume is captured inside the same 7-day window. 
+Instead:
 
-I also found upon research that most online retailers keep daily models but change how they evaluate and use it because procurement, supplier orders, and manufacturing run on weekly cycles. This strategy is best for businesses needing both granular daily insight and accurate weekly planning as it retains daily trend shapes.
-  
----
+- Use weekly forecast totals to establish the overall labor and fulfillment requirement.
+- Visualize historical demand by **day of week** to identify recurring high- and low-volume periods.
+- Combine these recurring day-of-week patterns with the weekly forecast to distribute expected workload across the week.
+- Schedule additional labor on consistently high-demand days and reduce staffing on historically quieter days, while allowing for operational buffers.
 
-## Segment Labels
+This approach uses the model's stronger weekly signal while retaining useful information about recurring daily demand patterns.
 
-    **Micro**: 1 unit
+### 4. Forecast Monitoring
 
-    **Standard**: 2-3 units
+Monitor the model after deployment using:
 
-    **Heavy-Retail**: 4-12 units
-    
-    **Commercial**: 13-32 units
-    
-    **High-Vol-Comm**: 33-120 units
+- Weekly WMAPE
+- Forecast bias
+- Error by SKU and product category
+- Error during promotions and seasonal periods
+- Performance drift over time
 
-    **Core-Wholesale**: 121-1000 units
-
-    **Mega-Bulk-Tail**:  1001-19152 units to be handled separately / rules-based.
+Feature importance should also be monitored after retraining. Large changes in the importance of price, SKU demand, or rolling features may indicate changes in customer behavior, pricing strategy, or product mix.
 
 ---
 
-## Set Up (for MacOS)
+## Forecasting Strategy
+
+The model is trained at the daily level and evaluated both daily and after aggregating predictions to weekly totals.
+
+Weekly aggregation improves operational usefulness because it reduces the effect of day-to-day timing variation. Demand that occurs on Tuesday instead of Wednesday may create a large daily error but have little impact on the total weekly volume.
+
+The resulting strategy preserves daily forecast detail while using weekly forecasts as the primary planning output for procurement and inventory decisions.
+
+
+---
+
+## Limitations & Next Steps
+
+- **Monthly and manual tiers are identified but not modeled.** They are currently scoped out rather than forecast — a reasonable next iteration would build a lightweight monthly-cadence model for the monthly tier specifically, given it still carries a non-trivial 12% of volume.
+- **Recurring-bulk orders are classified but not yet used as a feature.** SKUs with a regular large-order cadence were flagged during EDA but a `days_since_last_spike`-style feature has not been added to the trained model. This likely affects a small SKU subset but could recover some of the volume currently excluded by the row-level cutoff.
+- **Static SKU features imply the model needs periodic refitting.** Since `SKU mean quantity` (frozen at fit time) dominates gain, the model will be slow to react if a SKU's demand pattern genuinely shifts mid-deployment. A refit cadence (e.g., monthly) should be built into the production plan rather than treating the model as fit-once.
+- **Bias, while small, hasn't been corrected in production.** The -1.76% bias should be addressed (via multiplier or alpha re-tuning, above) before this model drives automated ordering.
+- **Category-level breakdown of remaining error is unexplored** — a next step would be checking whether residual error clusters by product category, which could point to additional useful features.
+
+
+---
+
+## Setup (macOS)
 
 ```bash
-# clone repo:
+# Clone the repository
 git clone https://github.com/machaniG/retail-demand-forecasting.git
 
-# create virtual environement
+# Create and activate a virtual environment
 python -m venv venv
 source venv/bin/activate
 
-# install requirements
+# Install dependencies
 pip install -r requirements.txt
 ```
