@@ -2,45 +2,23 @@
 
 ## Summary
 
-This project builds a LightGBM demand forecasting model for online retail using historical SKU demand, pricing, rolling demand signals, and calendar features.
+This project aims to answer the main question: **what demand should we expect in the future?** to solve the dual risks of overstocking and stockouts across thousands of daily orders for an online retailer. It builts builds a LightGBM demand forecasting system for weekly inventory and financial planning on fast-moving products with **11.3% error rate and a forecast bias of only -1.8%**.
 
-The model uses **quantile regression with `alpha=0.60`**, targeting the 60th percentile of demand to place greater emphasis on avoiding under-forecasting than a median forecast.
+**Operational Implementation:** Use the model as a baseline for weekly inventory planning but add a constant multiplier to eliminate stockout risks as it tends to under-predict sales by 2%. 
 
-| Forecast horizon | WMAPE | Forecast bias |
-|---|---:|---:|
-| Weekly | **11.3%** | **-1.8%** |
-| Daily | **63.0%** | Not reported |
-
-The weekly forecast is the primary operational output because weekly aggregation reduces the effect of volatile day-to-day ordering patterns.
-
-**Key finding:** Historical SKU demand is the strongest forecast anchor. Price and price ratio are also major drivers, while rolling demand and calendar features refine the forecast based on current momentum and timing.
+**Demand Drivers:** Pricing is a major demand lever, but it generally modifies demand around the product's underlying popularity. Product popularity matters and a discount increases sales more when the discounted product already has meaningful established demand. Use price as an operational lever to actively manipulate demand via pricing strategies for known products. 
 
 ---
 
 ## Business Problem
 
-Online retailers must balance two competing inventory risks:
-
-- **Overstocking:** Excess inventory ties up working capital, increases storage costs, and raises the risk of markdowns or obsolescence.
-- **Stockouts:** Insufficient inventory causes lost sales, delayed fulfillment, and poorer customer experience.
-
-Demand varies substantially across products and over time. A forecasting system must estimate expected demand while accounting for product popularity, pricing, recent sales momentum, and recurring calendar patterns.
+In high volume online retail where daily sales reach thousands of units, managing inventory without accurate demand forecasting quickly turns into a high-stakes balancing act between two operational traps: tied-up capital from overstocking or lost revenue and customer churn from stockouts. Demand forecasting bridges this gap by transforming historical sales data into predictive operational visibility—ensuring inventory levels precisely mirror real market demand while protecting cash flow and optimizing warehouse throughput. 
 
 ---
 
 ## Business Solution
 
-The project uses a **single LightGBM model** trained across the 99th percentile of fast moving weekly selling SKUs. The model learns demand patterns using a shared feature set that captures:
-
-- Long-term SKU demand characteristics
-- Current and relative pricing
-- Recent demand momentum and volatility
-- Product lifecycle maturity
-- Weekly and seasonal calendar effects
-
-The model uses LightGBM's **quantile objective with `alpha=0.60`**. This targets a forecast above the conditional median and is intended to reduce the operational risk of under-forecasting when stockouts are more costly than holding a modest amount of additional inventory.
-
----
+To solve the dual risks of overstocking and stockouts across thousands of daily orders, this project built a Segmented Demand Forecasting System.
 
 ## EDA Insights
 
@@ -59,6 +37,7 @@ EDA revealed that historical demand is highly skewed, ranging from 1 to 19k unit
 
 If a forecasting model sees all these together, it will try to learn a single process for multiple demand-generating mechanisms.
 That often hurts forecasting. After detailed EDA, I found that most SKUs sell from 1 unit to large of batches and that basically all customers place both small and large orders. This means that the data cannot be segmented using either **Customer ID or SKU** alone. 
+
 
 ### Outlier Removal
 
@@ -86,7 +65,6 @@ However, after doing research again I found that before deployment, the producti
 - **Forecast bias: -1.76%** (a slight, near-negligible under-prediction)
 
 Bias evaluation revealed a slight **near negligible negative bias (-1.76%)**. indicating the model has a small tendency of **under-predicting sales by only 2 percent**, which is within the **industry benchmak (forecast bias ±5%)**. The near-zero bias means the forecast is not systematically skewed in either direction at the aggregate level. The model is production ready as it is because errors are minor and cancel out naturally. However, because the model predicts lower sales than actually occurs by 2 percent, it needs minor adjustment such as applying a light 1.07x multiplier to eliminate stockout risk
-
 
 ---
 
@@ -220,7 +198,6 @@ Weekly aggregation improves operational usefulness because it reduces the effect
 
 The resulting strategy preserves daily forecast detail while using weekly forecasts as the primary planning output for procurement and inventory decisions.
 
-
 ---
 
 ## Limitations & Next Steps
@@ -228,7 +205,7 @@ The resulting strategy preserves daily forecast detail while using weekly foreca
 - **Monthly and manual tiers are identified but not modeled.** They are currently scoped out rather than forecast — a reasonable next iteration would build a lightweight monthly-cadence model for the monthly tier specifically, given it still carries a non-trivial 12% of volume.
 - **Recurring-bulk orders are classified but not yet used as a feature.** SKUs with a regular large-order cadence were flagged during EDA but a `days_since_last_spike`-style feature has not been added to the trained model. This likely affects a small SKU subset but could recover some of the volume currently excluded by the row-level cutoff.
 - **Static SKU features imply the model needs periodic refitting.** Since `SKU mean quantity` (frozen at fit time) dominates gain, the model will be slow to react if a SKU's demand pattern genuinely shifts mid-deployment. A refit cadence (e.g., monthly) should be built into the production plan rather than treating the model as fit-once.
-- **Bias, while small, hasn't been corrected in production.** The -1.76% bias should be addressed (via multiplier or alpha re-tuning, above) before this model drives automated ordering.
+- **Bias, while small, has not been corrected in production.** The -1.76% bias should be addressed (via multiplier or alpha re-tuning, above) before this model drives automated ordering.
 - **Category-level breakdown of remaining error is unexplored** — a next step would be checking whether residual error clusters by product category, which could point to additional useful features.
 
 
