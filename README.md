@@ -20,6 +20,23 @@ In high volume online retail where daily sales reach thousands of units, managin
 
 To solve the dual risks of overstocking and stockouts across thousands of daily orders, this project built a Segmented Demand Forecasting System.
 
+```plaintext
+
+| Week               |    Actual Demand   | Predicted Demand|
+|---:| ---:| ---:|
+|2010-09-27/2010-10-03 |         25245  |    29612|
+|2010-10-04/2010-10-10  |        94579   |   87164|
+|2010-10-11/2010-10-17        | 100534   |   91444|
+|2010-10-18/2010-10-24   |       73002   |   84473|
+| 2010-10-25/2010-10-31        | 73018   |  107391|
+| 2010-11-01/2010-11-07  |        86389   |  104448|
+| 2010-11-08/2010-11-14  |        98862  |   104222|
+| 2010-11-15/2010-11-21 |        104493  |   129046|
+| 2010-11-22/2010-11-28 |         92839  |    99103|
+| 2010-11-29/2010-12-05 |         91092  |   110610|
+```
+
+
 ## EDA Insights
 
 EDA revealed that historical demand is highly skewed, ranging from 1 to 19k units. A very tiny fraction (**0.1% of the total transactions**); only 500 out of over 504,731K transactions have quantities over 1K. However, the 500 transactions (0.1% of transactions) account for 10.7% of total volume. This is not a simple long tail but a fundamentally different demand regime.
