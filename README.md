@@ -148,7 +148,7 @@ Use the **weekly forecast** as the primary baseline for purchase planning and re
 
 Because the model has a small negative bias of **-1.8%**, address the bias before automated reordering. A small, consistent under-prediction means inventory systems relying on the raw forecast will order marginally fewer units than the market buys. Two standard approaches are usually applied:
 
-- **Operational multiplier (fastest to deploy):** apply a small upward correction factor (~1.018x, derived from the bias) to recenter the forecast near zero bias without retraining.
+- **Operational multiplier (fastest to deploy):** apply a small upward correction factor (derived from the bias) to recenter the forecast near zero bias without retraining.
 - **Re-tune alpha:** since bias is governed largely by the quantile objective's alpha, a small alpha increase (e.g., 0.62–0.65) may close the remaining gap directly, cheaper to validate than adding new features, since it doesn't change what the model is learning, just where it's calibrated.
 
 Inventory decisions should still incorporate service-level targets, supplier lead times, and safety-stock policies.
