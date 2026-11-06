@@ -153,18 +153,7 @@ Because the model has a small negative bias of **-1.8%**, address the bias befor
 
 Inventory decisions should still incorporate service-level targets, supplier lead times, and safety-stock policies.
 
-### 2. Scope SKUs Tiers Appropriately: Only weekly tier to automated reordering
-
-Only the 2,358 SKUs classified into the weekly forecast tier should feed automated reordering. This tier represents 87% of volume, so the operational coverage is high despite covering just over half the SKU catalog by count.
-
-Route monthly-tier and manual B2B routing appropriately, not by default
-
-- **Monthly tier (32% of SKUs, 12% of volume):** real, recurring demand, just not enough for week-level patterns. Recommend either a lighter monthly-aggregated model (not yet built) or monthly-cadence manual review, rather than forcing these into the weekly pipeline.
-- **Manual tier (12% of SKUs, <1% of volume):** too sparse to model statistically. Route to simple reorder-point rules; a trained model would be fitting noise here.
-- **Flagged manual-review spikes (within the weekly tier):** large, irregular orders identified during EDA should continue to bypass the automated forecast and go to manual B2B tracking, regardless of which tier the SKU otherwise belongs to.
-
-
-### 3. Pricing and Promotion Planning
+### 2. Pricing and Promotion Planning
 
 Price and price ratio are major model drivers. Category managers can use pricing scenarios to assess how forecast demand changes under different price levels.
 
@@ -177,7 +166,7 @@ Promotions should be evaluated together with SKU demand history:
 Category managers simulating a discount should weight the expected volume lift by the SKU's baseline demand (from feature importance: SKU mean quantity dominates gain), a discount on an already-high-velocity item is far more likely to require a temporary inventory buffer than the same discount on a low-baseline item.
 
 
-### 4. Warehouse and Labor Scheduling
+### 3. Warehouse and Labor Scheduling
 
 Do not use the raw daily forecast as the sole basis for rigid hour-by-hour staffing because daily WMAPE is **63%**.
 
@@ -216,8 +205,6 @@ The resulting strategy preserves daily forecast detail while using weekly foreca
 
 ## Limitations & Next Steps
 
-- **Monthly and manual tiers are identified but not modeled.** They are currently scoped out rather than forecast — a reasonable next iteration would build a lightweight monthly-cadence model for the monthly tier specifically, given it still carries a non-trivial 12% of volume.
-- **Recurring-bulk orders are classified but not yet used as a feature.** SKUs with a regular large-order cadence were flagged during EDA but a `days_since_last_spike`-style feature has not been added to the trained model. This likely affects a small SKU subset but could recover some of the volume currently excluded by the row-level cutoff.
 - **Static SKU features imply the model needs periodic refitting.** Since `SKU mean quantity` (frozen at fit time) dominates gain, the model will be slow to react if a SKU's demand pattern genuinely shifts mid-deployment. A refit cadence (e.g., monthly) should be built into the production plan rather than treating the model as fit-once.
 - **Bias, while small, has not been corrected in production.** The -1.76% bias should be addressed (via multiplier or alpha re-tuning, above) before this model drives automated ordering.
 - **Category-level breakdown of remaining error is unexplored** — a next step would be checking whether residual error clusters by product category, which could point to additional useful features.
